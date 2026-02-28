@@ -31,6 +31,11 @@ load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 import anthropic
 import httpx
 
+# ---- Mock mode --------------------------------------------------------------
+_MOCK_MODE = os.environ.get("MOCK_MODE", "false").lower() == "true"
+if _MOCK_MODE:
+    logging.getLogger(__name__).info("MOCK_MODE enabled — Brave/Claude API calls will be skipped")
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -225,6 +230,22 @@ async def analyze_text_claims(text: str) -> dict:
             "confidence": "low",
             "summary": "No text provided for analysis.",
             "sources": [],
+        }
+
+    # Mock mode — return template data without hitting any API
+    if _MOCK_MODE:
+        logger.info("MOCK: returning template text analysis")
+        return {
+            "flag": True,
+            "confidence": "medium",
+            "summary": (
+                "[MOCK] Simulated text analysis — this claim would require "
+                "additional context based on available sources."
+            ),
+            "sources": [
+                {"title": "Mock Source — Reuters", "url": "https://reuters.com/mock"},
+                {"title": "Mock Source — AP News", "url": "https://apnews.com/mock"},
+            ],
         }
 
     # Step 1 — web search

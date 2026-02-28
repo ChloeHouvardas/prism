@@ -40,9 +40,14 @@ from google.cloud import vision
 from google.api_core import exceptions as gcp_exceptions
 from google.api_core.client_options import ClientOptions
 
+# ---- Mock mode --------------------------------------------------------------
+_MOCK_MODE = os.environ.get("MOCK_MODE", "false").lower() == "true"
+
 # ---- Startup check ---------------------------------------------------------
 _vision_key = os.environ.get("GOOGLE_VISION_API_KEY", "")
-if _vision_key:
+if _MOCK_MODE:
+    logging.getLogger(__name__).info("MOCK_MODE enabled — Vision API calls will be skipped")
+elif _vision_key:
     logging.getLogger(__name__).info("GOOGLE_VISION_API_KEY is set (%d chars)", len(_vision_key))
 else:
     logging.getLogger(__name__).warning("GOOGLE_VISION_API_KEY is NOT set — image analysis will fail")
@@ -172,6 +177,16 @@ async def analyze_image_web_detection(image_url: str) -> dict:
     Raises:
         VisionAPIError on any failure (credentials, quota, network, etc.)
     """
+    # Mock mode — return template data without hitting any API
+    if _MOCK_MODE:
+        logger.info("MOCK: returning template image analysis for %s", image_url)
+        return {
+            "oldest_source_url": "https://example.com/mock-original-source",
+            "year": 2021,
+            "context": "[MOCK] Simulated image analysis — no API call made",
+            "is_mismatch": True,
+        }
+
     # Step 1 — download the image bytes ourselves
     image_bytes = await _download_image(image_url)
 
