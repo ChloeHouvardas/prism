@@ -26,7 +26,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Ensure .env is loaded even if this module is imported standalone
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 import anthropic
 import httpx

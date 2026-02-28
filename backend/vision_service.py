@@ -30,14 +30,22 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
 from dotenv import load_dotenv
 
 # Ensure .env is loaded even if this module is imported standalone
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 from google.cloud import vision
 from google.api_core import exceptions as gcp_exceptions
 from google.api_core.client_options import ClientOptions
+
+# ---- Startup check ---------------------------------------------------------
+_vision_key = os.environ.get("GOOGLE_VISION_API_KEY", "")
+if _vision_key:
+    logging.getLogger(__name__).info("GOOGLE_VISION_API_KEY is set (%d chars)", len(_vision_key))
+else:
+    logging.getLogger(__name__).warning("GOOGLE_VISION_API_KEY is NOT set — image analysis will fail")
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +96,70 @@ REPOST_DOMAINS = {
 
 # ---- Core analysis function -----------------------------------------------
 
+# ---- Image download --------------------------------------------------------
+
+_IMAGE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB cap
+
+async def _download_image(image_url: str) -> bytes:
+    """
+    Download image bytes from a URL. Uses browser-like headers so that
+    Instagram's CDN (and similar platforms) don't block the request.
+    
+    This is necessary because Google Vision API's image_uri mode has
+    Google's servers fetch the URL — Instagram's CDN blocks those requests
+    and the signed URLs may expire. Downloading ourselves and sending the
+    raw bytes via image.content is far more reliable.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://www.instagram.com/",
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0, follow_redirects=True, max_redirects=5
+        ) as client:
+            resp = await client.get(image_url, headers=headers)
+            resp.raise_for_status()
+
+            if len(resp.content) > _IMAGE_MAX_BYTES:
+                raise VisionAPIError(
+                    f"Image too large ({len(resp.content)} bytes, max {_IMAGE_MAX_BYTES})"
+                )
+
+            content_type = resp.headers.get("content-type", "")
+            if not content_type.startswith("image/"):
+                logger.warning("Unexpected content-type: %s", content_type)
+
+            logger.info(
+                "Downloaded image: %d bytes, type=%s",
+                len(resp.content),
+                content_type,
+            )
+            return resp.content
+
+    except httpx.HTTPStatusError as exc:
+        raise VisionAPIError(
+            f"Failed to download image (HTTP {exc.response.status_code})"
+        ) from exc
+    except httpx.RequestError as exc:
+        raise VisionAPIError(
+            f"Failed to download image: {exc}"
+        ) from exc
+
+
 async def analyze_image_web_detection(image_url: str) -> dict:
     """
     Run Google Vision WEB_DETECTION on the given image URL and return
     structured results about where the image appears on the web.
+
+    The image is downloaded first (to bypass CDN restrictions on signed
+    URLs like Instagram's) and sent as raw bytes to the Vision API.
 
     Returns:
         {
@@ -104,9 +172,15 @@ async def analyze_image_web_detection(image_url: str) -> dict:
     Raises:
         VisionAPIError on any failure (credentials, quota, network, etc.)
     """
+    # Step 1 — download the image bytes ourselves
+    image_bytes = await _download_image(image_url)
+
+    # Step 2 — send to Vision API
     try:
-        result = await asyncio.to_thread(_run_web_detection, image_url)
+        result = await asyncio.to_thread(_run_web_detection, image_bytes)
         return result
+    except VisionAPIError:
+        raise
     except gcp_exceptions.GoogleAPICallError as exc:
         logger.error("Vision API call failed: %s", exc)
         raise VisionAPIError(f"Vision API error: {exc.message}") from exc
@@ -120,15 +194,16 @@ async def analyze_image_web_detection(image_url: str) -> dict:
         raise VisionAPIError(f"Unexpected error: {exc}") from exc
 
 
-def _run_web_detection(image_url: str) -> dict:
+def _run_web_detection(image_bytes: bytes) -> dict:
     """
     Synchronous helper — called via asyncio.to_thread().
-    Performs the actual Vision API request and parses the response.
+    Performs the actual Vision API request using raw image bytes and
+    parses the response.
     """
     client = _get_client()
 
     image = vision.Image()
-    image.source.image_uri = image_url
+    image.content = image_bytes  # raw bytes instead of URL
 
     response = client.web_detection(image=image)
 

@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 # Load environment variables BEFORE importing services so env vars are
 # available even if a service reads them at module-init time.
 _env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=_env_path)
+load_dotenv(dotenv_path=_env_path, override=True)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -214,10 +214,21 @@ async def analyze_post(request: PostRequest):
             return ImageAnalysisResponse(**data)
         except VisionAPIError as exc:
             logger.warning("Image analysis failed in /analyze/post: %s", exc)
-            return None
+            # Return a minimal result so the UI can show the error
+            return ImageAnalysisResponse(
+                oldest_source_url="",
+                year=0,
+                context=f"Image analysis unavailable: {exc}",
+                is_mismatch=False,
+            )
         except Exception as exc:
             logger.error("Unexpected error in image analysis: %s", exc, exc_info=True)
-            return None
+            return ImageAnalysisResponse(
+                oldest_source_url="",
+                year=0,
+                context=f"Image analysis error: {exc}",
+                is_mismatch=False,
+            )
 
     async def _safe_text(text: str) -> TextAnalysisResponse | None:
         try:
