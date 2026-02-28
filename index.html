@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!--
+  index.html — Popup Entry Point
+  ===========================================================================
+  This is the HTML page that Vite uses as its entry point. After building,
+  Vite outputs an optimised version to dist/index.html with hashed JS/CSS
+  asset references.
+
+  Chrome loads this file as the extension popup when the user clicks the
+  Prism toolbar icon. Manifest V3's Content Security Policy forbids inline
+  scripts, so Vite's production build (which emits external script tags)
+  works correctly out of the box.
+  ===========================================================================
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Prism</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
