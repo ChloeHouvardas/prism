@@ -76,9 +76,44 @@ async function handleAnalyzePost(data, sendResponse) {
 
     const result = await response.json();
     console.log("[Prism] Backend response:", result);
+
+    // Store the result in session storage so the popup can display it
+    storeAnalyzedPost(data, result);
+
     sendResponse(result);
   } catch (err) {
     console.error("[Prism] Fetch failed:", err.message);
     sendResponse({ error: err.message });
+  }
+}
+
+// ---- Session storage for popup feed ---------------------------------------
+// After each successful analysis, append the result to chrome.storage.session
+// so the popup can display a running list of analyzed posts. Capped at 50.
+
+const MAX_STORED_POSTS = 50;
+
+async function storeAnalyzedPost(data, result) {
+  try {
+    const store = await chrome.storage.session.get("analyzedPosts");
+    const posts = store.analyzedPosts || [];
+
+    const entry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: Date.now(),
+      imageUrl: data.imageUrl || null,
+      textExcerpt: (data.text || "").slice(0, 120),
+      result: result,
+    };
+
+    posts.push(entry);
+
+    // Keep only the most recent entries
+    const trimmed = posts.slice(-MAX_STORED_POSTS);
+
+    await chrome.storage.session.set({ analyzedPosts: trimmed });
+    console.log("[Prism] Stored analyzed post:", entry.id);
+  } catch (err) {
+    console.error("[Prism] Failed to store analyzed post:", err.message);
   }
 }
