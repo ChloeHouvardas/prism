@@ -16,6 +16,8 @@
 //   3. A WeakSet tracks articles we've already processed so no post is ever
 //      logged (or later analysed) more than once.
 //   4. extractPostData() pulls the image URL and caption text from each post.
+//   5. sendToBackground() forwards the extracted data to the background service
+//      worker via chrome.runtime.sendMessage(), which then calls the backend.
 // ---------------------------------------------------------------------------
 
 console.log("TruthLens active");
@@ -37,8 +39,10 @@ const intersectionObserver = new IntersectionObserver(
       if (entry.isIntersecting) {
         console.log("[Prism] Post entered viewport:", entry.target);
 
-        // Extract data from the post that just became visible.
-        extractPostData(entry.target);
+        // Extract data from the post that just became visible and send
+        // it to the background worker for backend analysis.
+        const postData = extractPostData(entry.target);
+        sendToBackground(postData);
 
         // Stop watching this article — we only need the first intersection.
         intersectionObserver.unobserve(entry.target);
@@ -163,6 +167,40 @@ function getHighestResSrcsetUrl(srcset) {
   }
 
   return bestUrl;
+}
+
+// ---- Background communication ---------------------------------------------
+
+// sendToBackground(postData)
+// ---------------------------------------------------------------------------
+// Sends extracted post data to the background service worker for analysis.
+// The background worker will forward it to the FastAPI backend and return
+// the analysis result. Content scripts cannot make cross-origin fetch()
+// calls directly — the background worker acts as a proxy.
+// ---------------------------------------------------------------------------
+function sendToBackground(postData) {
+  // Skip if there's nothing to analyse.
+  if (!postData.imageUrl && !postData.text) {
+    console.log("[Prism] Skipping analysis — no image or text extracted.");
+    return;
+  }
+
+  chrome.runtime.sendMessage(
+    { type: "ANALYZE_POST", data: postData },
+    (response) => {
+      if (chrome.runtime.lastError) {
+        console.error("[Prism] Message error:", chrome.runtime.lastError.message);
+        return;
+      }
+
+      if (response && response.error) {
+        console.error("[Prism] Backend error:", response.error);
+        return;
+      }
+
+      console.log("[Prism] Analysis result:", response);
+    }
+  );
 }
 
 // ---- Article tracking -----------------------------------------------------

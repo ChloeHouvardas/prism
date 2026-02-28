@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# Python virtual environment
+backend/venv/
+__pycache__/
+*.pyc
+
 # Build output (load this folder as an unpacked extension in Chrome)
 dist/
 
