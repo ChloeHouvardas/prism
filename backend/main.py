@@ -8,10 +8,11 @@
 #   POST /analyze/text   — Accepts caption/claim text, returns a fact-check
 #                          style response (flag, confidence, summary, sources).
 #   POST /analyze/post   — Accepts both image URL and text, returns a combined
-#                          analysis merging image and text results.
+#                          analysis merging image and text results. Runs both
+#                          analyzers in parallel via asyncio.gather.
 #
-# All handlers are async. The /analyze/image endpoint uses Google Cloud
-# Vision's WEB_DETECTION feature for real reverse-image analysis.
+# All handlers are async. Results are cached in-memory by MD5 hash of the
+# input (image URL or text) so repeated requests skip the API calls.
 # CORS is configured to allow requests from Chrome extensions (which use
 # the chrome-extension:// origin scheme).
 #
@@ -19,6 +20,8 @@
 # Requires:  Python 3.11+
 # ---------------------------------------------------------------------------
 
+import asyncio
+import hashlib
 import logging
 from pathlib import Path
 
@@ -63,6 +66,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---- In-memory cache -------------------------------------------------------
+# Keyed by MD5 hex digest of the input (image URL or text string).
+# Values are the parsed response dicts. Cleared on server restart.
+
+_image_cache: dict[str, dict] = {}
+_text_cache: dict[str, dict] = {}
+
+
+def _md5(value: str) -> str:
+    """Return the MD5 hex digest of a string."""
+    return hashlib.md5(value.encode()).hexdigest()
+
 
 # ---- Request / Response models ---------------------------------------------
 
@@ -111,6 +127,35 @@ class PostAnalysisResponse(BaseModel):
     text: TextAnalysisResponse | None = None
 
 
+# ---- Cached helper functions -----------------------------------------------
+
+
+async def _analyze_image_cached(image_url: str) -> dict:
+    """Return cached image analysis or call the Vision API and cache it."""
+    key = _md5(image_url)
+    if key in _image_cache:
+        logger.info("Image cache HIT: %s", key[:8])
+        return _image_cache[key]
+
+    logger.info("Image cache MISS: %s — calling Vision API", key[:8])
+    result = await analyze_image_web_detection(image_url)
+    _image_cache[key] = result
+    return result
+
+
+async def _analyze_text_cached(text: str) -> dict:
+    """Return cached text analysis or call Brave + Claude and cache it."""
+    key = _md5(text)
+    if key in _text_cache:
+        logger.info("Text cache HIT: %s", key[:8])
+        return _text_cache[key]
+
+    logger.info("Text cache MISS: %s — calling Brave + Claude", key[:8])
+    result = await analyze_text_claims(text)
+    _text_cache[key] = result
+    return result
+
+
 # ---- Endpoints -------------------------------------------------------------
 
 
@@ -121,7 +166,7 @@ async def analyze_image(request: ImageRequest):
     using Google Cloud Vision's WEB_DETECTION feature.
     """
     try:
-        result = await analyze_image_web_detection(request.image_url)
+        result = await _analyze_image_cached(request.image_url)
         return ImageAnalysisResponse(**result)
     except VisionAPIError as exc:
         logger.error("Image analysis failed: %s", exc)
@@ -138,7 +183,7 @@ async def analyze_text(request: TextRequest):
     using Brave Search + Claude.
     """
     try:
-        result = await analyze_text_claims(request.text)
+        result = await _analyze_text_cached(request.text)
         return TextAnalysisResponse(
             flag=result["flag"],
             confidence=result["confidence"],
@@ -157,42 +202,64 @@ async def analyze_text(request: TextRequest):
 async def analyze_post(request: PostRequest):
     """
     Accepts both an image URL and text, returns a combined analysis.
-    Delegates to the individual analyzers. Either field may be omitted.
-    Currently returns stubbed dummy data.
+    Runs image and text analysis in parallel via asyncio.gather.
+    Results are cached by MD5 hash of the input so repeated calls are instant.
     """
-    image_result = None
-    text_result = None
 
-    if request.image_url:
+    async def _safe_image(url: str) -> ImageAnalysisResponse | None:
         try:
-            logger.info("Analyzing image URL: %s", request.image_url[:120])
-            image_data = await analyze_image_web_detection(request.image_url)
-            logger.info("Image analysis result: %s", image_data)
-            image_result = ImageAnalysisResponse(**image_data)
+            logger.info("Analyzing image URL: %s", url[:120])
+            data = await _analyze_image_cached(url)
+            logger.info("Image analysis result: %s", data)
+            return ImageAnalysisResponse(**data)
         except VisionAPIError as exc:
             logger.warning("Image analysis failed in /analyze/post: %s", exc)
-            image_result = None
+            return None
         except Exception as exc:
             logger.error("Unexpected error in image analysis: %s", exc, exc_info=True)
-            image_result = None
-    else:
-        logger.info("No image_url in request")
+            return None
 
-    if request.text:
+    async def _safe_text(text: str) -> TextAnalysisResponse | None:
         try:
-            text_data = await analyze_text_claims(request.text)
-            text_result = TextAnalysisResponse(
-                flag=text_data["flag"],
-                confidence=text_data["confidence"],
-                summary=text_data["summary"],
-                sources=[SourceItem(**s) for s in text_data["sources"]],
+            data = await _analyze_text_cached(text)
+            return TextAnalysisResponse(
+                flag=data["flag"],
+                confidence=data["confidence"],
+                summary=data["summary"],
+                sources=[SourceItem(**s) for s in data["sources"]],
             )
         except TextAnalysisError as exc:
             logger.warning("Text analysis failed in /analyze/post: %s", exc)
-            text_result = None
+            return None
         except Exception as exc:
             logger.error("Unexpected error in text analysis: %s", exc)
-            text_result = None
+            return None
+
+    # Launch both tasks in parallel — asyncio.gather runs them concurrently.
+    tasks = []
+    has_image = request.image_url is not None
+    has_text = request.text is not None
+
+    if has_image:
+        tasks.append(_safe_image(request.image_url))
+    if has_text:
+        tasks.append(_safe_text(request.text))
+
+    if not tasks:
+        return PostAnalysisResponse()
+
+    results = await asyncio.gather(*tasks)
+
+    # Map results back based on which tasks were launched.
+    idx = 0
+    image_result = None
+    text_result = None
+
+    if has_image:
+        image_result = results[idx]
+        idx += 1
+    if has_text:
+        text_result = results[idx]
 
     return PostAnalysisResponse(
         image=image_result,
