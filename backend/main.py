@@ -10,7 +10,8 @@
 #   POST /analyze/post   — Accepts both image URL and text, returns a combined
 #                          analysis merging image and text results.
 #
-# All handlers are async and currently return dummy/stubbed data.
+# All handlers are async. The /analyze/image endpoint uses Google Cloud
+# Vision's WEB_DETECTION feature for real reverse-image analysis.
 # CORS is configured to allow requests from Chrome extensions (which use
 # the chrome-extension:// origin scheme).
 #
@@ -18,9 +19,20 @@
 # Requires:  Python 3.11+
 # ---------------------------------------------------------------------------
 
-from fastapi import FastAPI
+import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from vision_service import analyze_image_web_detection, VisionAPIError
+
+# Load environment variables from .env (for GOOGLE_APPLICATION_CREDENTIALS)
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+logger = logging.getLogger(__name__)
 
 # ---- App setup -------------------------------------------------------------
 
@@ -67,10 +79,11 @@ class PostRequest(BaseModel):
 
 
 class ImageAnalysisResponse(BaseModel):
-    """Reverse-image-search style result."""
-    oldest_source: str
+    """Reverse-image-search style result from Google Vision WEB_DETECTION."""
+    oldest_source_url: str
     year: int
     context: str
+    is_mismatch: bool
 
 
 class TextAnalysisResponse(BaseModel):
@@ -93,15 +106,18 @@ class PostAnalysisResponse(BaseModel):
 @app.post("/analyze/image", response_model=ImageAnalysisResponse)
 async def analyze_image(request: ImageRequest):
     """
-    Accepts an image URL and returns reverse-image-search style results.
-    Currently returns stubbed dummy data.
+    Accepts an image URL and returns reverse-image-search style results
+    using Google Cloud Vision's WEB_DETECTION feature.
     """
-    # TODO: Implement real reverse image search / analysis
-    return ImageAnalysisResponse(
-        oldest_source="example.com",
-        year=2019,
-        context="placeholder",
-    )
+    try:
+        result = await analyze_image_web_detection(request.image_url)
+        return ImageAnalysisResponse(**result)
+    except VisionAPIError as exc:
+        logger.error("Image analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.error("Unexpected error in /analyze/image: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/analyze/text", response_model=TextAnalysisResponse)
@@ -130,12 +146,15 @@ async def analyze_post(request: PostRequest):
     text_result = None
 
     if request.image_url:
-        # TODO: call real image analysis
-        image_result = ImageAnalysisResponse(
-            oldest_source="example.com",
-            year=2019,
-            context="placeholder",
-        )
+        try:
+            image_data = await analyze_image_web_detection(request.image_url)
+            image_result = ImageAnalysisResponse(**image_data)
+        except VisionAPIError as exc:
+            logger.warning("Image analysis failed in /analyze/post: %s", exc)
+            image_result = None
+        except Exception as exc:
+            logger.error("Unexpected error in image analysis: %s", exc)
+            image_result = None
 
     if request.text:
         # TODO: call real text analysis

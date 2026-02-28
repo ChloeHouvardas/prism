@@ -6,6 +6,9 @@ backend/venv/
 __pycache__/
 *.pyc
 
+# Secrets / credentials (service account key files, .env)
+backend/.env
+
 # Build output (load this folder as an unpacked extension in Chrome)
 dist/
 
