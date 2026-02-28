@@ -6,7 +6,9 @@
   "description": "Chrome extension to detect misinformation in Instagram posts",
   "scripts": {
     "dev": "vite build --watch",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.content.config.js",
+    "build:popup": "vite build",
+    "build:content": "vite build --config vite.content.config.js",
     "preview": "vite preview"
   },
   "dependencies": {
