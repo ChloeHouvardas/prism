@@ -23,16 +23,21 @@ import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Load environment variables BEFORE importing services so env vars are
+# available even if a service reads them at module-init time.
+_env_path = Path(__file__).parent / ".env"
+load_dotenv(dotenv_path=_env_path)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from vision_service import analyze_image_web_detection, VisionAPIError
-
-# Load environment variables from .env (for GOOGLE_APPLICATION_CREDENTIALS)
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+from text_service import analyze_text_claims, TextAnalysisError
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 # ---- App setup -------------------------------------------------------------
 
@@ -86,12 +91,18 @@ class ImageAnalysisResponse(BaseModel):
     is_mismatch: bool
 
 
+class SourceItem(BaseModel):
+    """A single search-result source."""
+    title: str
+    url: str
+
+
 class TextAnalysisResponse(BaseModel):
     """Fact-check style result."""
     flag: bool
     confidence: str
     summary: str
-    sources: list[str]
+    sources: list[SourceItem]
 
 
 class PostAnalysisResponse(BaseModel):
@@ -123,16 +134,23 @@ async def analyze_image(request: ImageRequest):
 @app.post("/analyze/text", response_model=TextAnalysisResponse)
 async def analyze_text(request: TextRequest):
     """
-    Accepts caption / claim text and returns a fact-check style response.
-    Currently returns stubbed dummy data.
+    Accepts caption / claim text and returns a fact-check style response
+    using Brave Search + Claude.
     """
-    # TODO: Implement real text / claim analysis
-    return TextAnalysisResponse(
-        flag=False,
-        confidence="low",
-        summary="placeholder",
-        sources=[],
-    )
+    try:
+        result = await analyze_text_claims(request.text)
+        return TextAnalysisResponse(
+            flag=result["flag"],
+            confidence=result["confidence"],
+            summary=result["summary"],
+            sources=[SourceItem(**s) for s in result["sources"]],
+        )
+    except TextAnalysisError as exc:
+        logger.error("Text analysis failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.error("Unexpected error in /analyze/text: %s", exc)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/analyze/post", response_model=PostAnalysisResponse)
@@ -147,23 +165,34 @@ async def analyze_post(request: PostRequest):
 
     if request.image_url:
         try:
+            logger.info("Analyzing image URL: %s", request.image_url[:120])
             image_data = await analyze_image_web_detection(request.image_url)
+            logger.info("Image analysis result: %s", image_data)
             image_result = ImageAnalysisResponse(**image_data)
         except VisionAPIError as exc:
             logger.warning("Image analysis failed in /analyze/post: %s", exc)
             image_result = None
         except Exception as exc:
-            logger.error("Unexpected error in image analysis: %s", exc)
+            logger.error("Unexpected error in image analysis: %s", exc, exc_info=True)
             image_result = None
+    else:
+        logger.info("No image_url in request")
 
     if request.text:
-        # TODO: call real text analysis
-        text_result = TextAnalysisResponse(
-            flag=False,
-            confidence="low",
-            summary="placeholder",
-            sources=[],
-        )
+        try:
+            text_data = await analyze_text_claims(request.text)
+            text_result = TextAnalysisResponse(
+                flag=text_data["flag"],
+                confidence=text_data["confidence"],
+                summary=text_data["summary"],
+                sources=[SourceItem(**s) for s in text_data["sources"]],
+            )
+        except TextAnalysisError as exc:
+            logger.warning("Text analysis failed in /analyze/post: %s", exc)
+            text_result = None
+        except Exception as exc:
+            logger.error("Unexpected error in text analysis: %s", exc)
+            text_result = None
 
     return PostAnalysisResponse(
         image=image_result,

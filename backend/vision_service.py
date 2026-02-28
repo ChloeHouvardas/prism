@@ -27,7 +27,13 @@ import asyncio
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 from urllib.parse import urlparse
+
+from dotenv import load_dotenv
+
+# Ensure .env is loaded even if this module is imported standalone
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 from google.cloud import vision
 from google.api_core import exceptions as gcp_exceptions
