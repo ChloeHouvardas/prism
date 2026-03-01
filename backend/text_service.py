@@ -508,6 +508,22 @@ CATEGORY (pick exactly one):
 - If flag is false, you MUST set category to "none".
 - If flag is true, pick the single most applicable category.
 - If the search results are insufficient to evaluate the claim, set flag=false, confidence="low", category="none", and explain in the summary.
+
+SIGNAL WEIGHTING — not every dimension matters equally for every category.
+Use the following guide when deciding which signals to prioritise:
+  fabricated      → TEXT is primary (claims unsupported by any source). IMAGE supports if provenance shows reuse.
+  false_context   → IMAGE + CONSISTENCY are primary (real image placed in a misleading new context).
+  manipulated     → IMAGE is primary (doctored or altered visual content).
+  imposter        → AUTHOR is primary (content falsely attributed to someone).
+  false_connection → CONSISTENCY is primary (caption/headline contradicts the actual image or linked content).
+  satire          → TEXT is primary (tone, source identification, satirical markers).
+  astroturfing    → AUTHOR is primary (coordinated inauthentic patterns, red-flag reputation signals).
+  sponsored_disguised → TEXT is primary (language patterns suggesting undisclosed paid promotion).
+
+HANDLING ABSENT SIGNALS:
+- If IMAGE PROVENANCE data says "No image provided" or is inconclusive, treat the image dimension as NEUTRAL. Do NOT let a missing image pull the verdict toward flagging.
+- If no AUTHOR REPUTATION signals are found, treat author as NEUTRAL rather than suspicious.
+- Never flag a post solely because a signal is absent. A flag requires positive evidence from at least one primary signal for the chosen category.
 """
     user_prompt = (
         f"CLAIM:\n{text or ''}\n\n"

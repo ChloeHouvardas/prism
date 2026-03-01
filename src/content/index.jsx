@@ -49,6 +49,23 @@ function getHighestResSrcsetUrl(srcset) {
   return bestUrl;
 }
 
+/**
+ * Returns true if the <img> element is likely a profile-picture avatar
+ * rather than the post's content image.
+ */
+function isAvatarImage(img) {
+  // Instagram sets alt to "{username}'s profile picture" on avatars
+  const alt = (img.getAttribute("alt") || "").toLowerCase();
+  if (alt.includes("profile picture")) return true;
+
+  // Avatars are small — typically 32-56 CSS px. Post images are 200px+.
+  const w = img.naturalWidth || img.width || 0;
+  const h = img.naturalHeight || img.height || 0;
+  if (w > 0 && w < 100 && h > 0 && h < 100) return true;
+
+  return false;
+}
+
 function extractPostData(postElement) {
   // ---- Image extraction ---------------------------------------------------
   let imageUrl = null;
@@ -59,6 +76,7 @@ function extractPostData(postElement) {
     let bestWidth = 0;
 
     for (const img of imgs) {
+      if (isAvatarImage(img)) continue; // skip profile pictures
       const w = img.naturalWidth || img.width || 0;
       if (w > bestWidth) {
         bestWidth = w;
@@ -66,13 +84,18 @@ function extractPostData(postElement) {
       }
     }
 
-    if (!bestImg) bestImg = imgs[0];
-    imageUrl = getHighestResSrcsetUrl(bestImg.getAttribute("srcset"));
-    if (!imageUrl) imageUrl = bestImg.src || null;
+    if (!bestImg) bestImg = [...imgs].find((i) => !isAvatarImage(i)) || null;
+    if (bestImg) {
+      imageUrl = getHighestResSrcsetUrl(bestImg.getAttribute("srcset"));
+      if (!imageUrl) imageUrl = bestImg.src || null;
+    }
   } else {
-    const fallbackImg = postElement.querySelector("img");
-    if (fallbackImg) {
-      imageUrl = fallbackImg.src || null;
+    // Fallback: find a non-avatar <img> that is large enough to be content
+    const allImgs = postElement.querySelectorAll("img");
+    for (const img of allImgs) {
+      if (isAvatarImage(img)) continue;
+      imageUrl = img.src || null;
+      if (imageUrl) break;
     }
   }
 
