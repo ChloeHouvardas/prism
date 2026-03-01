@@ -94,26 +94,33 @@ function PostCard({ post }) {
   const timeAgo = formatTimeAgo(post.timestamp);
 
   return (
-    <div style={{
-      backdropFilter: 'blur(4px)',
-      WebkitBackdropFilter: 'blur(4px)',
-      backgroundColor: 'rgba(255, 255, 255, 0.03)',
-      border: '1px solid rgba(255, 255, 255, 0.08)',
-      borderRadius: '12px',
-      padding: '12px',
-      display: 'flex',
-      gap: '12px',
-      marginBottom: '8px',
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
-      transition: 'all 0.2s ease',
-      cursor: 'pointer'
-    }}
-    onMouseEnter={(e) => {
-      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-    }}>
+    <div 
+      onClick={() => post.postUrl && window.open(post.postUrl, '_blank')}
+      style={{
+        position: 'relative',
+        zIndex: 12,
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        backgroundColor: 'rgba(255, 255, 255, 0.7)',
+        border: '1px solid rgba(255, 255, 255, 0.8)',
+        borderRadius: '16px',
+        padding: '14px',
+        display: 'flex',
+        gap: '14px',
+        marginBottom: '12px',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+        transition: 'all 0.3s ease',
+        cursor: 'pointer',
+        overflow: 'hidden'
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = '0 12px 40px rgba(0, 0, 0, 0.15)';
+        e.currentTarget.style.transform = 'translateY(-2px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = '0 8px 32px rgba(0, 0, 0, 0.1)';
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}>
       {/* Thumbnail */}
       <div style={{ flexShrink: 0 }}>
         {post.imageUrl ? (
@@ -121,11 +128,12 @@ function PostCard({ post }) {
             src={post.imageUrl}
             alt=""
             style={{
-              width: '48px',
-              height: '48px',
-              borderRadius: '8px',
+              width: '70px',
+              height: '70px',
+              borderRadius: '12px',
               objectFit: 'cover',
-              backgroundColor: 'rgba(255, 255, 255, 0.1)'
+              border: '2px solid rgba(255, 255, 255, 0.5)',
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)'
             }}
             onError={(e) => {
               e.target.style.display = "none";
@@ -135,15 +143,16 @@ function PostCard({ post }) {
         ) : null}
         <div
           style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '8px',
-            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            width: '70px',
+            height: '70px',
+            borderRadius: '12px',
+            backgroundColor: 'rgba(200, 200, 200, 0.3)',
+            border: '2px solid rgba(255, 255, 255, 0.5)',
             display: post.imageUrl ? 'none' : 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '18px',
-            color: 'rgba(75, 75, 89, 0.6)'
+            fontSize: '28px',
+            color: '#999'
           }}
         >
           📷
@@ -152,17 +161,24 @@ function PostCard({ post }) {
 
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        {/* Top row: flag pill + time */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+        {/* Top row: flag pill + category + time */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '6px',
+          marginBottom: '8px', 
+          flexWrap: 'wrap'
+        }}>
           <span style={{
-            fontSize: '10px',
-            fontWeight: '600',
-            padding: '4px 8px',
-            borderRadius: '12px',
+            fontSize: '11px',
+            fontWeight: '700',
+            padding: '5px 10px',
+            borderRadius: '20px',
+            whiteSpace: 'nowrap',
             ...(() => {
-              if (level === 'high') return { backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)' };
-              if (level === 'medium') return { backgroundColor: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', border: '1px solid rgba(217, 119, 6, 0.3)' };
-              return { backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#86efac', border: '1px solid rgba(34, 197, 94, 0.3)' };
+              if (level === 'high') return { backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#dc2626', border: '1px solid rgba(239, 68, 68, 0.3)' };
+              if (level === 'medium') return { backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.3)' };
+              return { backgroundColor: 'rgba(34, 197, 94, 0.15)', color: '#16a34a', border: '1px solid rgba(34, 197, 94, 0.3)' };
             })()
           }}>
             {riskIcon(level)} {riskLabel(level)}
@@ -170,20 +186,22 @@ function PostCard({ post }) {
           {categoryLabel && (
             <span style={{
               fontSize: '10px',
-              padding: '4px 6px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(55, 65, 81, 0.3)',
-              color: 'rgba(156, 163, 175, 0.8)',
-              border: '1px solid rgba(75, 85, 99, 0.2)'
+              padding: '4px 8px',
+              borderRadius: '16px',
+              backgroundColor: 'rgba(100, 100, 100, 0.1)',
+              color: '#6b7280',
+              border: '1px solid rgba(150, 150, 150, 0.2)',
+              whiteSpace: 'nowrap'
             }}>
               {categoryLabel}
             </span>
           )}
           <span style={{
-            fontSize: '10px',
-            color: 'rgba(75, 75, 89, 0.7)',
+            fontSize: '11px',
+            color: '#9ca3af',
             marginLeft: 'auto',
-            flexShrink: 0
+            flexShrink: 0,
+            fontWeight: '500'
           }}>
             {timeAgo}
           </span>
@@ -192,14 +210,16 @@ function PostCard({ post }) {
         {/* Text excerpt */}
         {post.textExcerpt && (
           <p style={{
-            fontSize: '12px',
-            color: 'rgba(75, 75, 89, 0.8)',
-            lineHeight: '1.4',
-            marginBottom: '6px',
+            fontSize: '14px',
+            color: '#374151',
+            lineHeight: '1.5',
+            marginBottom: '8px',
+            margin: '0 0 8px 0',
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
-            overflow: 'hidden'
+            overflow: 'hidden',
+            fontWeight: '600'
           }}>
             {post.textExcerpt}
           </p>
@@ -208,14 +228,16 @@ function PostCard({ post }) {
         {/* Context summary */}
         {post.result?.summary && (
           <p style={{
-            fontSize: '11px',
-            color: 'rgba(107, 114, 128, 0.8)',
-            lineHeight: '1.4',
-            marginBottom: '4px',
+            fontSize: '12px',
+            color: '#6b7280',
+            lineHeight: '1.5',
+            marginBottom: '8px',
+            margin: '0 0 8px 0',
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
-            overflow: 'hidden'
+            overflow: 'hidden',
+            fontWeight: '400'
           }}>
             {post.result.summary}
           </p>
@@ -226,19 +248,23 @@ function PostCard({ post }) {
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
-            fontSize: '10px',
-            color: 'rgba(75, 75, 89, 0.7)'
+            gap: '6px',
+            fontSize: '11px',
+            color: '#6b7280',
+            backgroundColor: 'rgba(150, 150, 150, 0.1)',
+            padding: '6px 10px',
+            borderRadius: '12px',
+            border: '1px solid rgba(200, 200, 200, 0.3)'
           }}>
             <span>🔗</span>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: '500' }}>
               {domainFromUrl(post.result.image_provenance.oldest_source_url)}
             </span>
             {post.result.image_provenance.year ? (
-              <span style={{ color: 'rgba(107, 114, 128, 0.6)' }}>({post.result.image_provenance.year})</span>
+              <span style={{ color: '#9ca3af' }}>({post.result.image_provenance.year})</span>
             ) : null}
             {post.result.image_provenance.is_mismatch && (
-              <span style={{ color: 'rgba(251, 191, 36, 0.8)', marginLeft: '4px' }} title="Image may be from a different source">⚠️</span>
+              <span style={{ color: '#f59e0b', marginLeft: '4px' }} title="Image may be from a different source">⚠️</span>
             )}
           </div>
         )}
@@ -457,71 +483,112 @@ export default function App() {
 
   return (
     <div style={{
-      display: 'flex',
-      flexDirection: 'column',
+      position: 'relative',
+      width: '100%',
       height: '100vh',
-      backgroundColor: '#ffffff'
+      backgroundColor: '#f4f4f6',
+      overflow: 'hidden'
     }}>
-      {/* Header */}
-      <header style={{
-        flexShrink: 0,
-        padding: '20px 16px 12px',
-        borderBottom: '1px solid rgba(75, 75, 89, 0.1)'
-      }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between'
-        }}>
-          <h1 style={{
-            fontSize: '20px',
-            fontWeight: '700',
-            background: 'linear-gradient(135deg, #4B4B59 0%, #6B7280 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            margin: 0
-          }}>
-            Prism
-          </h1>
-          {sortedPosts.length > 0 && (
-            <span style={{
-              fontSize: '10px',
-              fontWeight: '500',
-              color: 'rgba(75, 75, 89, 0.8)',
-              backgroundColor: 'rgba(75, 75, 89, 0.08)',
-              padding: '4px 8px',
-              borderRadius: '12px',
-              border: '1px solid rgba(75, 75, 89, 0.1)'
-            }}>
-              {sortedPosts.length} post{sortedPosts.length !== 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-        <p style={{
-          fontSize: '11px',
-          color: 'rgba(75, 75, 89, 0.6)',
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-          marginTop: '8px',
-          margin: '8px 0 0 0'
-        }}>
-          Instagram misinformation detector
-        </p>
-      </header>
-
-      {/* Divider */}
+      {/* Background gem decorations - same as empty state */}
       <div style={{
-        height: '1px',
-        backgroundColor: 'rgba(75, 75, 89, 0.1)',
-        margin: '0 16px'
-      }} />
+        position: 'absolute',
+        left: '-130px',
+        top: '365px',
+        width: '270px',
+        height: '270px',
+        zIndex: 1,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/9926486361fa94d64aa031f0e3b7970dde9c2e0c.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
 
-      {/* Body */}
-      <main style={{
-        flex: 1,
+      <div style={{
+        position: 'absolute',
+        right: '-150px',
+        top: '290px',
+        width: '400px',
+        height: '400px',
+        transform: 'rotate(-18deg)',
+        zIndex: 5,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/0d76c941b6498b0075eef088c1d6b2bb07c7908c.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      <div style={{
+        position: 'absolute',
+        right: '-95px',
+        bottom: '-135px',
+        width: '420px',
+        height: '420px',
+        transform: 'rotate(8deg)',
+        zIndex: 2,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/c17c68f8e18c5c1c1648399fb28175ffe6cb4326.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      <div style={{
+        position: 'absolute',
+        left: '95px',
+        bottom: '-120px',
+        width: '250px',
+        height: '250px',
+        transform: 'rotate(-14deg)',
+        zIndex: 2,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/d429c39f6867b5ce2d27cfc5508281622d539613.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      {/* Card list overlay */}
+      <div style={{
+        position: 'relative',
+        zIndex: 10,
+        width: '100%',
+        height: '100vh',
         overflowY: 'auto',
-        padding: '12px 16px',
-        backgroundColor: '#ffffff'
+        padding: '20px 16px'
       }}>
         {loading ? (
           <div style={{
@@ -540,7 +607,6 @@ export default function App() {
             }} />
           </div>
         ) : (
-          /* Post feed */
           <div style={{
             display: 'flex',
             flexDirection: 'column',
@@ -551,20 +617,7 @@ export default function App() {
             ))}
           </div>
         )}
-      </main>
-
-      {/* Footer */}
-      <footer style={{
-        flexShrink: 0,
-        padding: '8px 16px',
-        textAlign: 'center',
-        borderTop: '1px solid rgba(75, 75, 89, 0.1)'
-      }}>
-        <small style={{
-          fontSize: '10px',
-          color: 'rgba(107, 114, 128, 0.6)'
-        }}>v1.0.0</small>
-      </footer>
+      </div>
     </div>
   );
 }
