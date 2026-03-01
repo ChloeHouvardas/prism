@@ -37,7 +37,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from vision_service import analyze_image_web_detection, VisionAPIError
-from text_service import analyze_text_claims, TextAnalysisError
+from text_service import analyze_text_claims, analyze_post_unified, TextAnalysisError
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -73,6 +73,7 @@ app.add_middleware(
 
 _image_cache: dict[str, dict] = {}
 _text_cache: dict[str, dict] = {}
+_unified_cache: dict[str, dict] = {}
 
 
 def _md5(value: str) -> str:
@@ -94,9 +95,10 @@ class TextRequest(BaseModel):
 
 
 class PostRequest(BaseModel):
-    """Payload for the /analyze/post endpoint (image + text combined)."""
+    """Payload for the /analyze/post endpoint (image + text + author)."""
     image_url: str | None = None
     text: str | None = None
+    author: str | None = None
 
 
 class ImageAnalysisResponse(BaseModel):
@@ -119,12 +121,31 @@ class TextAnalysisResponse(BaseModel):
     confidence: str
     summary: str
     sources: list[SourceItem]
+    category: str
+
+
+class ReasoningResponse(BaseModel):
+    """Cross-signal reasoning breakdown."""
+    image: str | None = None
+    text: str | None = None
+    author: str | None = None
+    consistency: str | None = None
+
+
+class UnifiedAnalysisResponse(BaseModel):
+    """Unified multi-signal analysis result."""
+    # REMOVED: UnifiedAnalysisResponse replaced by flat PostAnalysisResponse
 
 
 class PostAnalysisResponse(BaseModel):
-    """Combined analysis of both image and text."""
-    image: ImageAnalysisResponse | None = None
-    text: TextAnalysisResponse | None = None
+    """Combined analysis of both image and text, plus unified reasoning."""
+    flag: bool
+    confidence: str
+    category: str
+    summary: str
+    reasoning: ReasoningResponse
+    sources: list[SourceItem]
+    image_provenance: ImageAnalysisResponse | None = None
 
 
 # ---- Cached helper functions -----------------------------------------------
@@ -189,6 +210,7 @@ async def analyze_text(request: TextRequest):
             confidence=result["confidence"],
             summary=result["summary"],
             sources=[SourceItem(**s) for s in result["sources"]],
+            category=result["category"],
         )
     except TextAnalysisError as exc:
         logger.error("Text analysis failed: %s", exc)
@@ -206,73 +228,54 @@ async def analyze_post(request: PostRequest):
     Results are cached by MD5 hash of the input so repeated calls are instant.
     """
 
-    async def _safe_image(url: str) -> ImageAnalysisResponse | None:
+    async def _safe_image(url: str) -> dict | None:
         try:
             logger.info("Analyzing image URL: %s", url[:120])
             data = await _analyze_image_cached(url)
             logger.info("Image analysis result: %s", data)
-            return ImageAnalysisResponse(**data)
+            return data
         except VisionAPIError as exc:
             logger.warning("Image analysis failed in /analyze/post: %s", exc)
-            # Return a minimal result so the UI can show the error
-            return ImageAnalysisResponse(
-                oldest_source_url="",
-                year=0,
-                context=f"Image analysis unavailable: {exc}",
-                is_mismatch=False,
-            )
+            return {
+                "oldest_source_url": "",
+                "year": 0,
+                "context": f"Image analysis unavailable: {exc}",
+                "is_mismatch": False,
+            }
         except Exception as exc:
             logger.error("Unexpected error in image analysis: %s", exc, exc_info=True)
-            return ImageAnalysisResponse(
-                oldest_source_url="",
-                year=0,
-                context=f"Image analysis error: {exc}",
-                is_mismatch=False,
-            )
+            return {
+                "oldest_source_url": "",
+                "year": 0,
+                "context": f"Image analysis error: {exc}",
+                "is_mismatch": False,
+            }
 
-    async def _safe_text(text: str) -> TextAnalysisResponse | None:
-        try:
-            data = await _analyze_text_cached(text)
-            return TextAnalysisResponse(
-                flag=data["flag"],
-                confidence=data["confidence"],
-                summary=data["summary"],
-                sources=[SourceItem(**s) for s in data["sources"]],
-            )
-        except TextAnalysisError as exc:
-            logger.warning("Text analysis failed in /analyze/post: %s", exc)
-            return None
-        except Exception as exc:
-            logger.error("Unexpected error in text analysis: %s", exc)
-            return None
+    # Unified cache helper
+    def _unified_cache_key(image_url, text, author):
+        key = f"{image_url or ''}|{text or ''}|{author or ''}"
+        return _md5(key)
 
-    # Launch both tasks in parallel — asyncio.gather runs them concurrently.
-    tasks = []
-    has_image = request.image_url is not None
-    has_text = request.text is not None
-
-    if has_image:
-        tasks.append(_safe_image(request.image_url))
-    if has_text:
-        tasks.append(_safe_text(request.text))
-
-    if not tasks:
-        return PostAnalysisResponse()
-
-    results = await asyncio.gather(*tasks)
-
-    # Map results back based on which tasks were launched.
-    idx = 0
     image_result = None
-    text_result = None
+    if request.image_url:
+        image_result = await _safe_image(request.image_url)
 
-    if has_image:
-        image_result = results[idx]
-        idx += 1
-    if has_text:
-        text_result = results[idx]
+    cache_key = _unified_cache_key(request.image_url, request.text, request.author)
+    if cache_key in _unified_cache:
+        logger.info("Unified cache HIT: %s", cache_key[:8])
+        unified_result = _unified_cache[cache_key]
+    else:
+        logger.info("Unified cache MISS: %s — running unified analysis", cache_key[:8])
+        unified_result = await analyze_post_unified(image_result, request.text, request.author)
+        _unified_cache[cache_key] = unified_result
 
+    # Compose response
     return PostAnalysisResponse(
-        image=image_result,
-        text=text_result,
+        flag=unified_result["flag"],
+        confidence=unified_result["confidence"],
+        category=unified_result["category"],
+        summary=unified_result["summary"],
+        reasoning=ReasoningResponse(**unified_result["reasoning"]),
+        sources=[SourceItem(**s) for s in unified_result["sources"]],
+        image_provenance=ImageAnalysisResponse(**image_result) if image_result else None
     )

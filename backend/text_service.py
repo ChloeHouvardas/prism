@@ -1,15 +1,19 @@
-# backend/text_service.py — Text Claim Analysis for Prism
+# backend/text_service.py — Text & Unified Post Analysis for Prism
 # ---------------------------------------------------------------------------
-# Orchestrates two external APIs to fact-check caption / claim text:
+# Orchestrates external APIs to fact-check text claims and provide unified
+# multi-signal analysis of Instagram posts:
 #
-#   1. Brave Search API  — retrieves the top web results for the claim so
-#      Claude has factual grounding material.
-#   2. Anthropic Claude  — evaluates the claim against the search results
-#      and returns a structured verdict.
+#   1. Brave Search API  — retrieves web results for claim grounding and
+#      author reputation signals.
+#   2. Anthropic Claude  — evaluates claims against search results and
+#      performs cross-signal reasoning in unified mode.
 #
-# Public function:
+# Public functions:
 #   analyze_text_claims(text: str) -> dict
-#       Returns { flag, confidence, summary, sources }
+#       Returns { flag, confidence, summary, sources, category }
+#
+#   analyze_post_unified(image_result: dict | None, text: str, author: str | None) -> dict
+#       Returns { flag, confidence, summary, category, reasoning, sources }
 #
 # Environment variables required (loaded via python-dotenv in main.py):
 #   BRAVE_SEARCH_API_KEY   — https://brave.com/search/api/
@@ -18,6 +22,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -107,10 +113,108 @@ async def _search_brave(query: str) -> list[SearchResult]:
 
 
 # ---------------------------------------------------------------------------
+# Author reputation lookup
+# ---------------------------------------------------------------------------
+
+_REPUTATION_RED_FLAGS = {"misinformation", "fake", "suspended", "banned", "propaganda"}
+_AUTHOR_MAX_RESULTS = 3
+
+
+async def _search_author_reputation(author: str | None) -> dict:
+    """
+    Query Brave Search for reputation signals about an Instagram author.
+
+    Returns { author, signals, flagged } where *flagged* is True if any
+    snippet contains a red-flag keyword.
+    """
+    empty = {"author": None, "signals": [], "flagged": False}
+
+    if not author or not author.strip():
+        return empty
+
+    author = author.strip()
+
+    api_key = os.environ.get("BRAVE_SEARCH_API_KEY")
+    if not api_key:
+        logger.warning("BRAVE_SEARCH_API_KEY not set — skipping author reputation check")
+        return {**empty, "author": author}
+
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": api_key,
+    }
+
+    # Run two queries in parallel for broader coverage
+    queries = [
+        f"{author} Instagram credibility",
+        f"{author} misinformation",
+    ]
+
+    snippets: list[str] = []
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            import asyncio
+
+            responses = await asyncio.gather(
+                *(
+                    client.get(
+                        BRAVE_SEARCH_URL,
+                        headers=headers,
+                        params={"q": q, "count": _AUTHOR_MAX_RESULTS},
+                    )
+                    for q in queries
+                ),
+                return_exceptions=True,
+            )
+
+        for resp in responses:
+            if isinstance(resp, Exception):
+                logger.warning("Author reputation search error: %s", resp)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            for item in data.get("web", {}).get("results", [])[:_AUTHOR_MAX_RESULTS]:
+                snippet = item.get("description", "").strip()
+                if snippet:
+                    snippets.append(snippet)
+
+    except Exception as exc:
+        logger.warning("Author reputation lookup failed: %s", exc)
+        return {**empty, "author": author}
+
+    flagged = any(
+        keyword in snippet.lower()
+        for snippet in snippets
+        for keyword in _REPUTATION_RED_FLAGS
+    )
+
+    return {
+        "author": author,
+        "signals": snippets,
+        "flagged": flagged,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Claude analysis
 # ---------------------------------------------------------------------------
 
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# Valid misinformation categories Claude may assign
+MISINFO_CATEGORIES = {
+    "fabricated",
+    "false_context",
+    "manipulated",
+    "imposter",
+    "false_connection",
+    "satire",
+    "astroturfing",
+    "sponsored_disguised",
+    "none",
+}
 
 SYSTEM_PROMPT = """\
 You are Prism, a neutral misinformation-detection assistant embedded in a \
@@ -128,10 +232,25 @@ RULES:
   {
     "flag": <bool>,       // true = claim needs attention / additional context
     "confidence": "<low|medium|high>",
-    "summary": "<1-2 sentence neutral summary>"
+    "summary": "<1-2 sentence neutral summary>",
+    "category": "<one of the categories below>"
   }
+
+CATEGORY (pick exactly one):
+  fabricated          — entirely made-up content with no factual basis
+  false_context       — real content shared with false contextual info
+  manipulated         — genuine content that has been doctored or altered
+  imposter            — content falsely attributed to a real public figure/org
+  false_connection    — headlines/captions that don't match the actual content
+  satire              — satirical content likely to be mistaken as real
+  astroturfing        — coordinated inauthentic behaviour / fake grassroots
+  sponsored_disguised — paid promotion disguised as organic content
+  none                — content appears genuine / no misinformation detected
+
+- If flag is false, you MUST set category to "none".
+- If flag is true, pick the single most applicable category.
 - If the search results are insufficient to evaluate the claim, set
-  flag=false, confidence="low", and explain in the summary.
+  flag=false, confidence="low", category="none", and explain in the summary.
 """
 
 
@@ -197,15 +316,26 @@ async def _analyze_with_claude(
         raise TextAnalysisError("Claude returned invalid JSON")
 
     # Validate expected keys
-    if not all(k in result for k in ("flag", "confidence", "summary")):
+    if not all(k in result for k in ("flag", "confidence", "summary", "category")):
         raise TextAnalysisError(
             f"Claude response missing required keys. Got: {list(result.keys())}"
         )
 
+    flag = bool(result["flag"])
+    category = str(result.get("category", "none")).lower()
+
+    # Enforce: flag=false → category must be "none"
+    if not flag:
+        category = "none"
+    # Enforce: flag=true with invalid/missing category → fallback
+    elif category not in MISINFO_CATEGORIES or category == "none":
+        category = "fabricated"
+
     return {
-        "flag": bool(result["flag"]),
+        "flag": flag,
         "confidence": str(result["confidence"]),
         "summary": str(result["summary"]),
+        "category": category,
     }
 
 
@@ -230,6 +360,7 @@ async def analyze_text_claims(text: str) -> dict:
             "confidence": "low",
             "summary": "No text provided for analysis.",
             "sources": [],
+            "category": "none",
         }
 
     # Mock mode — return template data without hitting any API
@@ -246,6 +377,7 @@ async def analyze_text_claims(text: str) -> dict:
                 {"title": "Mock Source — Reuters", "url": "https://reuters.com/mock"},
                 {"title": "Mock Source — AP News", "url": "https://apnews.com/mock"},
             ],
+            "category": "false_context",
         }
 
     # Step 1 — web search
@@ -257,6 +389,7 @@ async def analyze_text_claims(text: str) -> dict:
             "confidence": "low",
             "summary": "No relevant sources found for this claim.",
             "sources": [],
+            "category": "none",
         }
 
     # Step 2 — Claude evaluation
@@ -268,4 +401,181 @@ async def analyze_text_claims(text: str) -> dict:
         "confidence": verdict["confidence"],
         "summary": verdict["summary"],
         "sources": [{"title": s.title, "url": s.url} for s in search_results],
+        "category": verdict["category"],
+    }
+
+
+async def analyze_post_unified(image_result: dict | None, text: str | None, author: str | None) -> dict:
+    """
+    Runs Brave text search and author reputation search in parallel, then calls Claude with all context.
+    Returns flat JSON shape:
+    {
+      "flag": bool,
+      "confidence": "low" | "medium" | "high",
+      "category": "fabricated" | "false_context" | "manipulated" | "imposter" | "false_connection" | "satire" | "astroturfing" | "sponsored_disguised" | "none",
+      "summary": "2-3 sentence neutral summary",
+      "reasoning": {
+        "image": "1 sentence",
+        "text": "1 sentence",
+        "author": "1 sentence",
+        "consistency": "1 sentence"
+      },
+      "sources": [{ "title": string, "url": string }]
+    }
+    """
+    if not text and not image_result:
+        return {
+            "flag": False,
+            "confidence": "low",
+            "category": "none",
+            "summary": "No post data provided for analysis.",
+            "reasoning": {
+                "image": "No image provided.",
+                "text": "No text provided.",
+                "author": "No author provided.",
+                "consistency": "No data to compare."
+            },
+            "sources": []
+        }
+    if _MOCK_MODE:
+        return {
+            "flag": True,
+            "confidence": "medium",
+            "category": "false_context",
+            "summary": "[MOCK] Simulated unified analysis — this post would require additional context based on available sources.",
+            "reasoning": {
+                "image": "[MOCK] Image appears reused.",
+                "text": "[MOCK] Text claim is ambiguous.",
+                "author": "[MOCK] Author reputation is unclear.",
+                "consistency": "[MOCK] Image and text do not fully align."
+            },
+            "sources": [
+                {"title": "Mock Source — Reuters", "url": "https://reuters.com/mock"},
+                {"title": "Mock Source — AP News", "url": "https://apnews.com/mock"}
+            ]
+        }
+    # Run Brave search and author reputation search in parallel
+    brave_task = _search_brave(text) if text else asyncio.sleep(0, result=[])
+    author_task = _search_author_reputation(author)
+    brave_results, author_signals = await asyncio.gather(brave_task, author_task)
+    # Compose sources for Claude
+    sources_block = "\n".join(
+        f"[{i+1}] {s.title}\n    URL: {s.url}\n    Snippet: {getattr(s, 'snippet', '')}"
+        for i, s in enumerate(brave_results)
+    )
+    author_block = "\n".join(f"- {sig}" for sig in author_signals.get("signals", []))
+    image_block = "No image provided."
+    if image_result:
+        image_block = (
+            f"Image provenance:\n"
+            f"  Oldest source: {image_result.get('oldest_source_url', '')}\n"
+            f"  Year: {image_result.get('year', '')}\n"
+            f"  Context: {image_result.get('context', '')}\n"
+            f"  Mismatch: {image_result.get('is_mismatch', False)}"
+        )
+    # Unified Claude prompt
+    UNIFIED_SYSTEM_PROMPT = """
+You are Prism, a neutral misinformation-detection assistant embedded in a browser extension. Your job is to evaluate whether a social-media post's caption or claim is supported, partially supported, or unsupported by recent, credible sources, and to reason across four dimensions: image origin, text credibility, image-text consistency, and author reputation.
+
+RULES:
+- Never use the words "fake", "false", "lie", or "hoax" — they are too inflammatory for a browser overlay. Instead use phrasing like "not supported by recent sources", "additional context available", or "claim could not be verified".
+- Always cite the sources provided in the SEARCH RESULTS section.
+- Return ONLY valid JSON matching this schema (no markdown fences):
+  {
+    "flag": <bool>,
+    "confidence": "<low|medium|high>",
+    "category": "<one of the categories below>",
+    "summary": "<2-3 sentence neutral summary>",
+    "reasoning": {
+      "image": "<1 sentence>",
+      "text": "<1 sentence>",
+      "author": "<1 sentence>",
+      "consistency": "<1 sentence>"
+    },
+    "sources": [{"title": string, "url": string}]
+  }
+
+CATEGORY (pick exactly one):
+  fabricated          — entirely made-up content with no factual basis
+  false_context       — real content shared with false contextual info
+  manipulated         — genuine content that has been doctored or altered
+  imposter            — content falsely attributed to a real public figure/org
+  false_connection    — headlines/captions that don't match the actual content
+  satire              — satirical content likely to be mistaken as real
+  astroturfing        — coordinated inauthentic behaviour / fake grassroots
+  sponsored_disguised — paid promotion disguised as organic content
+  none                — content appears genuine / no misinformation detected
+- If flag is false, you MUST set category to "none".
+- If flag is true, pick the single most applicable category.
+- If the search results are insufficient to evaluate the claim, set flag=false, confidence="low", category="none", and explain in the summary.
+"""
+    user_prompt = (
+        f"CLAIM:\n{text or ''}\n\n"
+        f"IMAGE PROVENANCE:\n{image_block}\n\n"
+        f"AUTHOR REPUTATION:\n{author or ''}\nSignals:\n{author_block}\n\n"
+        f"SEARCH RESULTS:\n{sources_block}\n\n"
+        "Evaluate the post across all four dimensions and return JSON."
+    )
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise TextAnalysisError("ANTHROPIC_API_KEY is not set")
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+    try:
+        message = await client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=700,
+            system=UNIFIED_SYSTEM_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": user_prompt,
+            }],
+        )
+    except anthropic.APIError as exc:
+        logger.error("Claude API error (unified): %s", exc)
+        raise TextAnalysisError(f"Claude API error: {exc}")
+    raw_text = message.content[0].text.strip()
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("\n", 1)[1]
+    if raw_text.endswith("```"):
+        raw_text = raw_text.rsplit("```", 1)[0].strip()
+    try:
+        result = json.loads(raw_text)
+    except json.JSONDecodeError as exc:
+        logger.error("Failed to parse Claude JSON (unified): %s\nRaw: %s", exc, raw_text)
+        raise TextAnalysisError("Claude returned invalid JSON (unified)")
+    # Validate keys
+    required_keys = {"flag", "confidence", "category", "summary", "reasoning", "sources"}
+    if not all(k in result for k in required_keys):
+        raise TextAnalysisError(f"Claude unified response missing required keys. Got: {list(result.keys())}")
+    reasoning_keys = {"image", "text", "author", "consistency"}
+    if not isinstance(result["reasoning"], dict) or not all(k in result["reasoning"] for k in reasoning_keys):
+        raise TextAnalysisError(f"Claude unified reasoning missing keys. Got: {list(result['reasoning'].keys())}")
+    # Normalize category
+    flag = bool(result["flag"])
+    category = str(result.get("category", "none")).lower()
+    if not flag:
+        category = "none"
+    elif category not in MISINFO_CATEGORIES or category == "none":
+        category = "fabricated"
+    # Normalize sources
+    sources = result["sources"]
+    if isinstance(sources, list):
+        sources = [
+            {"title": s.get("title", ""), "url": s.get("url", "")}
+            for s in sources if s.get("url")
+        ]
+    else:
+        sources = []
+    return {
+        "flag": flag,
+        "confidence": str(result["confidence"]),
+        "category": category,
+        "summary": str(result["summary"]),
+        "reasoning": {
+            "image": str(result["reasoning"]["image"]),
+            "text": str(result["reasoning"]["text"]),
+            "author": str(result["reasoning"]["author"]),
+            "consistency": str(result["reasoning"]["consistency"]),
+        },
+        "sources": sources
     }

@@ -103,7 +103,27 @@ function extractPostData(postElement) {
     textLength: text ? text.length : 0,
   });
 
-  return { imageUrl, text };
+  // ---- Author / username extraction ---------------------------------------
+  let author = null;
+
+  // Instagram puts the username in an <a> whose href is /<username>/
+  // near the top of each <article>. We look for short hrefs that match
+  // the pattern  /<word>/  (no deeper path segments).
+  const links = postElement.querySelectorAll('a[href^="/"]');
+  for (const link of links) {
+    const href = link.getAttribute("href");
+    const match = href.match(/^\/([A-Za-z0-9._]+)\/$/); 
+    if (match) {
+      // Skip obvious non-username paths
+      const skip = new Set(["explore", "reels", "stories", "direct", "accounts", "p"]);
+      if (!skip.has(match[1])) {
+        author = match[1];
+        break;
+      }
+    }
+  }
+
+  return { imageUrl, text, author };
 }
 
 // ---- Shadow DOM mounting --------------------------------------------------

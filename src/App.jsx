@@ -48,6 +48,17 @@ const PILL_STYLES = {
   high: "bg-red-600/20 text-red-400 border border-red-600/30",
 };
 
+const CATEGORY_LABELS = {
+  fabricated: "Fabricated",
+  false_context: "False Context",
+  manipulated: "Manipulated",
+  imposter: "Imposter Content",
+  false_connection: "False Connection",
+  satire: "Satire",
+  astroturfing: "Astroturfing",
+  sponsored_disguised: "Sponsored / Disguised",
+};
+
 function domainFromUrl(url) {
   try {
     return new URL(url).hostname;
@@ -61,8 +72,22 @@ function domainFromUrl(url) {
 function PostCard({ post }) {
   const textResult = post.result?.text;
   const imageResult = post.result?.image;
-  const level = riskLevel(textResult?.flag, textResult?.confidence);
+  const level = riskLevel(post.result?.flag, post.result?.confidence);
   const pill = PILL_STYLES[level] || PILL_STYLES.low;
+  const CATEGORY_EMOJI = {
+    fabricated: "🚫 Fabricated Content",
+    false_context: "🖼️ False Context",
+    manipulated: "✂️ Manipulated Content",
+    imposter: "🎭 Imposter Content",
+    false_connection: "🔗 False Connection / Clickbait",
+    satire: "🎪 Satire or Parody",
+    astroturfing: "🤖 Astroturfing",
+    sponsored_disguised: "💰 Undisclosed Sponsored Content",
+    none: null
+  };
+  const categoryLabel = post.result?.category && post.result.category !== "none"
+    ? CATEGORY_EMOJI[post.result.category] || null
+    : null;
 
   const timeAgo = formatTimeAgo(post.timestamp);
 
@@ -95,7 +120,12 @@ function PostCard({ post }) {
           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${pill}`}>
             {riskIcon(level)} {riskLabel(level)}
           </span>
-          <span className="text-[10px] text-prism-muted flex-shrink-0 ml-2">
+          {categoryLabel && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-700/50 text-gray-400 border border-gray-600/30">
+              {categoryLabel}
+            </span>
+          )}
+          <span className="text-[10px] text-prism-muted flex-shrink-0 ml-auto">
             {timeAgo}
           </span>
         </div>
@@ -108,26 +138,24 @@ function PostCard({ post }) {
         )}
 
         {/* Context summary */}
-        {textResult?.summary && (
+        {post.result?.summary && (
           <p className="text-[11px] text-gray-400 leading-snug line-clamp-2 mb-1">
-            {textResult.summary}
+            {post.result.summary}
           </p>
         )}
 
         {/* Image provenance */}
-        {imageResult?.oldest_source_url && (
+        {post.result?.image_provenance?.oldest_source_url && (
           <div className="flex items-center gap-1 text-[10px] text-prism-muted">
             <span>🔗</span>
             <span className="truncate">
-              {domainFromUrl(imageResult.oldest_source_url)}
+              {domainFromUrl(post.result.image_provenance.oldest_source_url)}
             </span>
-            {imageResult.year ? (
-              <span className="text-gray-500">({imageResult.year})</span>
+            {post.result.image_provenance.year ? (
+              <span className="text-gray-500">({post.result.image_provenance.year})</span>
             ) : null}
-            {imageResult.is_mismatch && (
-              <span className="text-amber-400 ml-1" title="Image may be from a different source">
-                ⚠️
-              </span>
+            {post.result.image_provenance.is_mismatch && (
+              <span className="text-amber-400 ml-1" title="Image may be from a different source">⚠️</span>
             )}
           </div>
         )}

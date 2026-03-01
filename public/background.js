@@ -32,7 +32,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // directly, so this worker acts as a proxy.
 //
 // Message format from content script:
-//   { type: "ANALYZE_POST", data: { imageUrl: string|null, text: string|null } }
+//   { type: "ANALYZE_POST", data: { imageUrl: string|null, text: string|null, author: string|null } }
 //
 // Response sent back to the content script:
 //   On success: the JSON response from the backend
@@ -59,6 +59,7 @@ async function handleAnalyzePost(data, sendResponse) {
     const body = {
       image_url: data.imageUrl || null,
       text: data.text || null,
+      author: data.author || null,
     };
 
     const response = await fetch(`${API_BASE}/analyze/post`, {
@@ -103,6 +104,7 @@ async function storeAnalyzedPost(data, result) {
       timestamp: Date.now(),
       imageUrl: data.imageUrl || null,
       textExcerpt: (data.text || "").slice(0, 120),
+      author: data.author || null,
       result: result,
     };
 

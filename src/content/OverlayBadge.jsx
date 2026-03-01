@@ -75,30 +75,45 @@ export default function OverlayBadge({ postData }) {
   useEffect(() => {
     if (!postData || (!postData.imageUrl && !postData.text)) return;
 
+    // Guard against stale extension context (happens after extension
+    // reload while the page is still open).
+    if (!chrome?.runtime?.id) {
+      console.warn("[Prism] Extension context invalidated — skipping analysis");
+      setErrorMsg("Extension was reloaded. Please refresh the page.");
+      setState("error");
+      return;
+    }
+
     setState("loading");
 
-    chrome.runtime.sendMessage(
-      { type: "ANALYZE_POST", data: postData },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          console.error("[Prism] Message error:", chrome.runtime.lastError.message);
-          setErrorMsg(chrome.runtime.lastError.message);
-          setState("error");
-          return;
-        }
+    try {
+      chrome.runtime.sendMessage(
+        { type: "ANALYZE_POST", data: postData },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("[Prism] Message error:", chrome.runtime.lastError.message);
+            setErrorMsg(chrome.runtime.lastError.message);
+            setState("error");
+            return;
+          }
 
-        if (response && response.error) {
-          console.error("[Prism] Backend error:", response.error);
-          setErrorMsg(response.error);
-          setState("error");
-          return;
-        }
+          if (response && response.error) {
+            console.error("[Prism] Backend error:", response.error);
+            setErrorMsg(response.error);
+            setState("error");
+            return;
+          }
 
-        console.log("[Prism] Analysis result:", response);
-        setResult(response);
-        setState("result");
-      }
-    );
+          console.log("[Prism] Analysis result:", response);
+          setResult(response);
+          setState("result");
+        }
+      );
+    } catch (err) {
+      console.warn("[Prism] sendMessage failed:", err.message);
+      setErrorMsg("Extension was reloaded. Please refresh the page.");
+      setState("error");
+    }
   }, [postData]);
 
   // Toggle panel
@@ -125,9 +140,8 @@ export default function OverlayBadge({ postData }) {
     badgeClass += " prism-badge--error";
     badgeContent = <span>❌ Error</span>;
   } else {
-    // result — backend returns { text: {...}, image: {...} }
-    const textResult = result?.text;
-    const level = riskLevel(textResult?.flag, textResult?.confidence);
+    // result — backend returns flat unified shape
+    const level = riskLevel(result?.flag, result?.confidence);
     badgeClass += ` prism-badge--${level}`;
     badgeContent = (
       <span>
@@ -137,117 +151,122 @@ export default function OverlayBadge({ postData }) {
   }
 
   // ---- Render -------------------------------------------------------------
-  return (
-    <>
-      <button className={badgeClass} onClick={togglePanel}>
-        {badgeContent}
-      </button>
-
-      <div className={`prism-panel ${panelOpen ? "prism-panel--open" : ""}`}>
-        {state === "loading" && <p className="prism-section-body">Running analysis…</p>}
-
-        {state === "error" && (
-          <div className="prism-section">
-            <div className="prism-section-title">Error</div>
-            <p className="prism-section-body">{errorMsg || "Something went wrong."}</p>
-          </div>
-        )}
-
-        {state === "result" && result && <ResultPanel result={result} />}
-      </div>
-    </>
-  );
-}
-
-// ---- Result sub-component -------------------------------------------------
-
-function ResultPanel({ result }) {
-  // Backend response fields are "text" and "image" (not "text_analysis" / "image_analysis")
-  const textAnalysis = result.text;
-  const imageAnalysis = result.image;
-
-  const textLevel = riskLevel(textAnalysis?.flag, textAnalysis?.confidence);
-  const confidenceNum = confidenceToNumber(textAnalysis?.confidence);
-
-  return (
-    <>
-      {/* ---- Text analysis ---- */}
-      {textAnalysis && (
+  function ResultPanel({ result }) {
+    // Category pill mapping
+    const CATEGORY_EMOJI = {
+      fabricated: "🚫 Fabricated Content",
+      false_context: "🖼️ False Context",
+      manipulated: "✂️ Manipulated Content",
+      imposter: "🎭 Imposter Content",
+      false_connection: "🔗 False Connection / Clickbait",
+      satire: "🎪 Satire or Parody",
+      astroturfing: "🤖 Astroturfing",
+      sponsored_disguised: "💰 Undisclosed Sponsored Content",
+      none: null
+    };
+    const level = riskLevel(result?.flag, result?.confidence);
+    const confidenceNum = confidenceToNumber(result?.confidence);
+    const pillLabel = result?.category && result.category !== "none" ? CATEGORY_EMOJI[result.category] : null;
+    return (
+      <>
         <div className="prism-section">
-          <div className="prism-section-title">Text Analysis</div>
-          <div className="prism-section-body">{textAnalysis.summary || "No summary available."}</div>
-
+          <div className="prism-section-title">Verdict</div>
+          <div className="prism-section-body">
+            <span className={`prism-category-pill`}>{pillLabel}</span>
+            {result?.summary && <div style={{ marginTop: 4 }}>{result.summary}</div>}
+          </div>
           <div className="prism-meter">
             <div className="prism-meter-bar">
               <div
-                className={`prism-meter-fill prism-meter-fill--${textLevel}`}
+                className={`prism-meter-fill prism-meter-fill--${level}`}
                 style={{ width: `${Math.round(confidenceNum * 100)}%` }}
               />
             </div>
-            <span className="prism-meter-label">
-              {textAnalysis.confidence || "N/A"}
-            </span>
+            <span className="prism-meter-label">{result?.confidence || "N/A"}</span>
           </div>
         </div>
-      )}
-
-      {/* ---- Sources ---- */}
-      {textAnalysis?.sources?.length > 0 && (
-        <>
-          <hr className="prism-divider" />
-          <div className="prism-section">
-            <div className="prism-section-title">Sources</div>
-            <ul className="prism-sources">
-              {textAnalysis.sources.slice(0, 5).map((src, i) => (
-                <li key={i}>
-                  <a href={src.url} target="_blank" rel="noopener noreferrer">
-                    {src.title || src.url}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </>
-      )}
-
-      {/* ---- Image analysis ---- */}
-      {imageAnalysis && (
-        <>
-          <hr className="prism-divider" />
-          <div className="prism-section">
-            <div className="prism-section-title">Image Analysis</div>
-            <div className="prism-section-body">
-              {imageAnalysis.context && (
-                <p>{imageAnalysis.context}</p>
-              )}
-              {imageAnalysis.is_mismatch && (
-                <p>
-                  ⚠️ This image appears to originate from a different source
-                </p>
-              )}
-              {imageAnalysis.oldest_source_url && (
-                <p>
-                  🔗 Earliest source:{" "}
-                  <a
-                    href={imageAnalysis.oldest_source_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: "#0366d6" }}
-                  >
-                    {(() => { try { return new URL(imageAnalysis.oldest_source_url).hostname; } catch(e) { return imageAnalysis.oldest_source_url; } })()}
-                  </a>
-                  {imageAnalysis.year && ` (${imageAnalysis.year})`}
-                </p>
-              )}
-              {!imageAnalysis.context &&
-                !imageAnalysis.oldest_source_url &&
-                !imageAnalysis.is_mismatch && (
-                  <p>No significant image matches found.</p>
-                )}
+        {result?.sources?.length > 0 && (
+          <>
+            <hr className="prism-divider" />
+            <div className="prism-section">
+              <div className="prism-section-title">Sources</div>
+              <ul className="prism-sources">
+                {result.sources.slice(0, 5).map((src, i) => (
+                  <li key={i}>
+                    <a href={src.url} target="_blank" rel="noopener noreferrer">
+                      {src.title || src.url}
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </div>
+          </>
+        )}
+        {result?.image_provenance && (
+          <>
+            <hr className="prism-divider" />
+            <div className="prism-section">
+              <div className="prism-section-title">Image Provenance</div>
+              <div className="prism-section-body">
+                {result.image_provenance.context && <p>{result.image_provenance.context}</p>}
+                {result.image_provenance.is_mismatch && (
+                  <p>⚠️ This image appears to originate from a different source</p>
+                )}
+                {result.image_provenance.oldest_source_url && (
+                  <p>
+                    🔗 Earliest source:{" "}
+                    <a href={result.image_provenance.oldest_source_url} target="_blank" rel="noopener noreferrer" style={{ color: "#0366d6" }}>
+                      {(() => { try { return new URL(result.image_provenance.oldest_source_url).hostname; } catch(e) { return result.image_provenance.oldest_source_url; } })()}
+                    </a>
+                    {result.image_provenance.year && ` (${result.image_provenance.year})`}
+                  </p>
+                )}
+                {!result.image_provenance.context &&
+                  !result.image_provenance.oldest_source_url &&
+                  !result.image_provenance.is_mismatch && (
+                    <p>No significant image matches found.</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+        <hr className="prism-divider" />
+        <div className="prism-section">
+          <div className="prism-section-title">Why?</div>
+          <div className="prism-reasoning-grid">
+            <div className="prism-reasoning-card"><strong>Image</strong><br />{result?.reasoning?.image}</div>
+            <div className="prism-reasoning-card"><strong>Text</strong><br />{result?.reasoning?.text}</div>
+            <div className="prism-reasoning-card"><strong>Author</strong><br />{result?.reasoning?.author}</div>
+            <div className="prism-reasoning-card"><strong>Consistency</strong><br />{result?.reasoning?.consistency}</div>
           </div>
-        </>
+        </div>
+      </>
+    );
+  }
+
+  // ---- Return the badge + expandable panel --------------------------------
+  return (
+    <div className="prism-container">
+      <button className={badgeClass} onClick={togglePanel}>
+        {badgeContent}
+      </button>
+      {panelOpen && (
+        <div className="prism-panel prism-panel--open">
+          {state === "error" && (
+            <div className="prism-section">
+              <div className="prism-section-body" style={{ color: "#d32f2f" }}>
+                {errorMsg || "Something went wrong."}
+              </div>
+            </div>
+          )}
+          {state === "loading" && (
+            <div className="prism-section">
+              <div className="prism-section-body">Analysing this post…</div>
+            </div>
+          )}
+          {state === "result" && result && <ResultPanel result={result} />}
+        </div>
       )}
-    </>
+    </div>
   );
 }
