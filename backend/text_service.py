@@ -28,6 +28,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 
@@ -66,6 +67,40 @@ class SearchResult:
     title: str
     url: str
     snippet: str
+
+
+# ---------------------------------------------------------------------------
+# Source credibility classification
+# ---------------------------------------------------------------------------
+
+_SATIRE_DOMAINS = {
+    "theonion.com", "babylonbee.com", "clickhole.com", "thebeaverton.com",
+    "waterfordwhispersnews.com", "newsthump.com", "thedailymash.co.uk",
+    "hard-drive.net", "hardtimes.net", "reductress.com",
+    "theshovel.com.au", "chaser.com.au", "private-eye.co.uk",
+}
+
+_CREDIBLE_DOMAINS = {
+    "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
+    "nytimes.com", "washingtonpost.com", "theguardian.com",
+    "snopes.com", "factcheck.org", "politifact.com",
+    "fullfact.org", "nature.com", "sciencedirect.com",
+    "who.int", "cdc.gov", "nih.gov", "nasa.gov",
+    "npr.org", "pbs.org",
+}
+
+
+def _classify_source(url: str) -> str:
+    """Return 'satire', 'credible', or 'unknown' based on the URL's domain."""
+    try:
+        domain = (urlparse(url).hostname or "").lower().removeprefix("www.")
+    except Exception:
+        return "unknown"
+    if domain in _SATIRE_DOMAINS:
+        return "satire"
+    if domain in _CREDIBLE_DOMAINS:
+        return "credible"
+    return "unknown"
 
 
 async def _search_brave(query: str) -> list[SearchResult]:
@@ -155,8 +190,6 @@ async def _search_author_reputation(author: str | None) -> dict:
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            import asyncio
-
             responses = await asyncio.gather(
                 *(
                     client.get(
@@ -251,13 +284,21 @@ CATEGORY (pick exactly one):
 - If flag is true, pick the single most applicable category.
 - If the search results are insufficient to evaluate the claim, set
   flag=false, confidence="low", category="none", and explain in the summary.
+
+SOURCE TYPES — each search result is tagged with a source type:
+  satire   — known satire/parody outlet (The Onion, Babylon Bee, etc.).
+             If the post's content originates from a satire source, classify
+             it as "satire" rather than "fabricated" or any other category.
+  credible — established news organisation or fact-checker. Weigh these
+             more heavily when corroborating or contradicting a claim.
+  unknown  — unclassified source. Use normal editorial judgement.
 """
 
 
 def _build_user_prompt(claim: str, sources: list[SearchResult]) -> str:
     """Build the user-message content that includes the claim + sources."""
     source_block = "\n".join(
-        f"[{i+1}] {s.title}\n    URL: {s.url}\n    Snippet: {s.snippet}"
+        f"[{i+1}] {s.title}\n    URL: {s.url}\n    Source type: {_classify_source(s.url)}\n    Snippet: {s.snippet}"
         for i, s in enumerate(sources)
     )
     return (
@@ -306,8 +347,6 @@ async def _analyze_with_claude(
         raw_text = raw_text.split("\n", 1)[1]  # remove opening ```json
     if raw_text.endswith("```"):
         raw_text = raw_text.rsplit("```", 1)[0].strip()
-
-    import json
 
     try:
         result = json.loads(raw_text)
@@ -460,7 +499,7 @@ async def analyze_post_unified(image_result: dict | None, text: str | None, auth
     brave_results, author_signals = await asyncio.gather(brave_task, author_task)
     # Compose sources for Claude
     sources_block = "\n".join(
-        f"[{i+1}] {s.title}\n    URL: {s.url}\n    Snippet: {getattr(s, 'snippet', '')}"
+        f"[{i+1}] {s.title}\n    URL: {s.url}\n    Source type: {_classify_source(s.url)}\n    Snippet: {getattr(s, 'snippet', '')}"
         for i, s in enumerate(brave_results)
     )
     author_block = "\n".join(f"- {sig}" for sig in author_signals.get("signals", []))
@@ -524,6 +563,14 @@ HANDLING ABSENT SIGNALS:
 - If IMAGE PROVENANCE data says "No image provided" or is inconclusive, treat the image dimension as NEUTRAL. Do NOT let a missing image pull the verdict toward flagging.
 - If no AUTHOR REPUTATION signals are found, treat author as NEUTRAL rather than suspicious.
 - Never flag a post solely because a signal is absent. A flag requires positive evidence from at least one primary signal for the chosen category.
+
+SOURCE TYPES — each search result is tagged with a source type:
+  satire   — known satire/parody outlet (The Onion, Babylon Bee, etc.).
+             If the post's content originates from a satire source, classify
+             it as "satire" rather than "fabricated" or any other category.
+  credible — established news organisation or fact-checker. Weigh these
+             more heavily when corroborating or contradicting a claim.
+  unknown  — unclassified source. Use normal editorial judgement.
 """
     user_prompt = (
         f"CLAIM:\n{text or ''}\n\n"
