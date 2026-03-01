@@ -27,6 +27,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -80,6 +81,13 @@ _SATIRE_DOMAINS = {
     "theshovel.com.au", "chaser.com.au", "private-eye.co.uk",
 }
 
+# Social-media handles belonging to known satire outlets
+_SATIRE_HANDLES = {
+    "theonion", "babylonbee", "clickhole", "thebeaverton",
+    "newsthump", "thedailymash", "reductress",
+    "theshovel", "hardtimesnews", "harddrivenews", "privateeye",
+}
+
 _CREDIBLE_DOMAINS = {
     "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk",
     "nytimes.com", "washingtonpost.com", "theguardian.com",
@@ -103,6 +111,19 @@ def _classify_source(url: str) -> str:
     return "unknown"
 
 
+def _classify_author(author: str | None) -> str:
+    """Return 'satire' or 'unknown' based on the social-media handle."""
+    if not author:
+        return "unknown"
+    handle = author.strip().lower().lstrip("@")
+    if handle in _SATIRE_HANDLES:
+        return "satire"
+    # Also check if the handle matches the prefix of any satire domain
+    if any(handle == d.split(".")[0] for d in _SATIRE_DOMAINS):
+        return "satire"
+    return "unknown"
+
+
 async def _search_brave(query: str) -> list[SearchResult]:
     """
     Call Brave Web Search and return the top results as SearchResult objects.
@@ -120,6 +141,7 @@ async def _search_brave(query: str) -> list[SearchResult]:
     params = {
         "q": query,
         "count": BRAVE_MAX_RESULTS,
+        "freshness": "pw",  # prefer results from the past week
     }
 
     try:
@@ -275,7 +297,8 @@ CATEGORY (pick exactly one):
   manipulated         — genuine content that has been doctored or altered
   imposter            — content falsely attributed to a real public figure/org
   false_connection    — headlines/captions that don't match the actual content
-  satire              — satirical content likely to be mistaken as real
+  satire              — satirical content from a known satire outlet or with
+                        clear satirical markers. ALWAYS set flag=true for satire.
   astroturfing        — coordinated inauthentic behaviour / fake grassroots
   sponsored_disguised — paid promotion disguised as organic content
   none                — content appears genuine / no misinformation detected
@@ -284,6 +307,21 @@ CATEGORY (pick exactly one):
 - If flag is true, pick the single most applicable category.
 - If the search results are insufficient to evaluate the claim, set
   flag=false, confidence="low", category="none", and explain in the summary.
+
+SATIRE RULE — satire is NOT "looks OK":
+  Content from a known satire outlet (source type = satire, or author type =
+  satire) MUST be flagged: set flag=true, category="satire", confidence="high".
+  The summary should note that it is satirical content, not real news.
+  Do NOT set flag=false for satire — users need to know the content is fictional.
+
+IMAGE MISMATCH RULE:
+- If IMAGE PROVENANCE shows "Mismatch: True", the image originates from an
+  unrelated source and is being used to dress up the post's claim.
+- This is strong positive evidence of false_context. You MUST set flag=true
+  and category="false_context" unless a more specific category (e.g. satire)
+  applies.
+- In the summary, note that the image does not originate from the context it
+  is presented in.
 
 SOURCE TYPES — each search result is tagged with a source type:
   satire   — known satire/parody outlet (The Onion, Babylon Bee, etc.).
@@ -302,6 +340,7 @@ def _build_user_prompt(claim: str, sources: list[SearchResult]) -> str:
         for i, s in enumerate(sources)
     )
     return (
+        f"TODAY'S DATE: {date.today().isoformat()}\n\n"
         f"CLAIM:\n{claim}\n\n"
         f"SEARCH RESULTS:\n{source_block}\n\n"
         "Evaluate the claim against the search results and return JSON."
@@ -540,13 +579,16 @@ CATEGORY (pick exactly one):
   manipulated         — genuine content that has been doctored or altered
   imposter            — content falsely attributed to a real public figure/org
   false_connection    — headlines/captions that don't match the actual content
-  satire              — satirical content likely to be mistaken as real
+  satire              — satirical content from a known satire outlet or with clear satirical markers. ALWAYS set flag=true for satire.
   astroturfing        — coordinated inauthentic behaviour / fake grassroots
   sponsored_disguised — paid promotion disguised as organic content
   none                — content appears genuine / no misinformation detected
 - If flag is false, you MUST set category to "none".
 - If flag is true, pick the single most applicable category.
 - If the search results are insufficient to evaluate the claim, set flag=false, confidence="low", category="none", and explain in the summary.
+
+SATIRE RULE (takes priority over the flag-false→none rule above):
+- If the post originates from a known satire publication (The Onion, Babylon Bee, Reductress, ClickHole, etc.) OR the Author type is "satire", you MUST return flag=true, category="satire", confidence="high" — even though satire is not malicious misinformation. The purpose is to alert readers that the content is fictional humour and should not be taken literally.
 
 SIGNAL WEIGHTING — not every dimension matters equally for every category.
 Use the following guide when deciding which signals to prioritise:
@@ -564,6 +606,11 @@ HANDLING ABSENT SIGNALS:
 - If no AUTHOR REPUTATION signals are found, treat author as NEUTRAL rather than suspicious.
 - Never flag a post solely because a signal is absent. A flag requires positive evidence from at least one primary signal for the chosen category.
 
+IMAGE MISMATCH RULE:
+- If IMAGE PROVENANCE shows "Mismatch: True", the image originates from an unrelated source and is being used to dress up the post's claim.
+- This is strong positive evidence of false_context. You MUST set flag=true and category="false_context" unless a more specific category (e.g. satire) applies.
+- In the summary, note that the image does not originate from the context it is presented in.
+
 SOURCE TYPES — each search result is tagged with a source type:
   satire   — known satire/parody outlet (The Onion, Babylon Bee, etc.).
              If the post's content originates from a satire source, classify
@@ -572,10 +619,12 @@ SOURCE TYPES — each search result is tagged with a source type:
              more heavily when corroborating or contradicting a claim.
   unknown  — unclassified source. Use normal editorial judgement.
 """
+    author_type = _classify_author(author)
     user_prompt = (
+        f"TODAY'S DATE: {date.today().isoformat()}\n\n"
         f"CLAIM:\n{text or ''}\n\n"
         f"IMAGE PROVENANCE:\n{image_block}\n\n"
-        f"AUTHOR REPUTATION:\n{author or ''}\nSignals:\n{author_block}\n\n"
+        f"AUTHOR REPUTATION:\n{author or ''}\nAuthor type: {author_type}\nSignals:\n{author_block}\n\n"
         f"SEARCH RESULTS:\n{sources_block}\n\n"
         "Evaluate the post across all four dimensions and return JSON."
     )
