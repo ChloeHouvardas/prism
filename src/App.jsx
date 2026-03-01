@@ -6,6 +6,8 @@
 // ---------------------------------------------------------------------------
 
 import React, { useState, useEffect } from "react";
+import OnboardingScreen from "./screens/OnboardingScreen";
+import OnboardingScreen2 from "./screens/OnboardingScreen2";
 
 // ---- Helpers --------------------------------------------------------------
 
@@ -92,14 +94,39 @@ function PostCard({ post }) {
   const timeAgo = formatTimeAgo(post.timestamp);
 
   return (
-    <div className="bg-prism-surface rounded-lg p-3 flex gap-3 hover:bg-prism-card transition-colors duration-150">
+    <div style={{
+      backdropFilter: 'blur(4px)',
+      WebkitBackdropFilter: 'blur(4px)',
+      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      borderRadius: '12px',
+      padding: '12px',
+      display: 'flex',
+      gap: '12px',
+      marginBottom: '8px',
+      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.08)',
+      transition: 'all 0.2s ease',
+      cursor: 'pointer'
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+    }}>
       {/* Thumbnail */}
-      <div className="flex-shrink-0">
+      <div style={{ flexShrink: 0 }}>
         {post.imageUrl ? (
           <img
             src={post.imageUrl}
             alt=""
-            className="w-12 h-12 rounded-md object-cover bg-prism-card"
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '8px',
+              objectFit: 'cover',
+              backgroundColor: 'rgba(255, 255, 255, 0.1)'
+            }}
             onError={(e) => {
               e.target.style.display = "none";
               e.target.nextElementSibling.style.display = "flex";
@@ -107,55 +134,111 @@ function PostCard({ post }) {
           />
         ) : null}
         <div
-          className={`w-12 h-12 rounded-md bg-prism-card flex items-center justify-center text-prism-muted text-lg ${post.imageUrl ? "hidden" : ""}`}
+          style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '8px',
+            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            display: post.imageUrl ? 'none' : 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '18px',
+            color: 'rgba(75, 75, 89, 0.6)'
+          }}
         >
           📷
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 min-w-0">
+      <div style={{ flex: 1, minWidth: 0 }}>
         {/* Top row: flag pill + time */}
-        <div className="flex items-center justify-between mb-1">
-          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${pill}`}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px', flexWrap: 'wrap', gap: '4px' }}>
+          <span style={{
+            fontSize: '10px',
+            fontWeight: '600',
+            padding: '4px 8px',
+            borderRadius: '12px',
+            ...(() => {
+              if (level === 'high') return { backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', border: '1px solid rgba(239, 68, 68, 0.3)' };
+              if (level === 'medium') return { backgroundColor: 'rgba(217, 119, 6, 0.2)', color: '#fbbf24', border: '1px solid rgba(217, 119, 6, 0.3)' };
+              return { backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#86efac', border: '1px solid rgba(34, 197, 94, 0.3)' };
+            })()
+          }}>
             {riskIcon(level)} {riskLabel(level)}
           </span>
           {categoryLabel && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-700/50 text-gray-400 border border-gray-600/30">
+            <span style={{
+              fontSize: '10px',
+              padding: '4px 6px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(55, 65, 81, 0.3)',
+              color: 'rgba(156, 163, 175, 0.8)',
+              border: '1px solid rgba(75, 85, 99, 0.2)'
+            }}>
               {categoryLabel}
             </span>
           )}
-          <span className="text-[10px] text-prism-muted flex-shrink-0 ml-auto">
+          <span style={{
+            fontSize: '10px',
+            color: 'rgba(75, 75, 89, 0.7)',
+            marginLeft: 'auto',
+            flexShrink: 0
+          }}>
             {timeAgo}
           </span>
         </div>
 
         {/* Text excerpt */}
         {post.textExcerpt && (
-          <p className="text-xs text-prism-muted leading-snug line-clamp-2 mb-1.5">
+          <p style={{
+            fontSize: '12px',
+            color: 'rgba(75, 75, 89, 0.8)',
+            lineHeight: '1.4',
+            marginBottom: '6px',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden'
+          }}>
             {post.textExcerpt}
           </p>
         )}
 
         {/* Context summary */}
         {post.result?.summary && (
-          <p className="text-[11px] text-gray-400 leading-snug line-clamp-2 mb-1">
+          <p style={{
+            fontSize: '11px',
+            color: 'rgba(107, 114, 128, 0.8)',
+            lineHeight: '1.4',
+            marginBottom: '4px',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden'
+          }}>
             {post.result.summary}
           </p>
         )}
 
         {/* Image provenance */}
         {post.result?.image_provenance?.oldest_source_url && (
-          <div className="flex items-center gap-1 text-[10px] text-prism-muted">
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '10px',
+            color: 'rgba(75, 75, 89, 0.7)'
+          }}>
             <span>🔗</span>
-            <span className="truncate">
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {domainFromUrl(post.result.image_provenance.oldest_source_url)}
             </span>
             {post.result.image_provenance.year ? (
-              <span className="text-gray-500">({post.result.image_provenance.year})</span>
+              <span style={{ color: 'rgba(107, 114, 128, 0.6)' }}>({post.result.image_provenance.year})</span>
             ) : null}
             {post.result.image_provenance.is_mismatch && (
-              <span className="text-amber-400 ml-1" title="Image may be from a different source">⚠️</span>
+              <span style={{ color: 'rgba(251, 191, 36, 0.8)', marginLeft: '4px' }} title="Image may be from a different source">⚠️</span>
             )}
           </div>
         )}
@@ -174,11 +257,160 @@ function formatTimeAgo(ts) {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+function EmptyStateFrame12() {
+  return (
+    <div style={{
+      position: 'relative',
+      width: '100%',
+      height: '100vh',
+      backgroundColor: '#f4f4f6',
+      overflow: 'hidden'
+    }}>
+      <div style={{
+        position: 'absolute',
+        left: '-130px',
+        top: '365px',
+        width: '270px',
+        height: '270px',
+        zIndex: 1,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/9926486361fa94d64aa031f0e3b7970dde9c2e0c.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      <div style={{
+        position: 'absolute',
+        right: '-150px',
+        top: '290px',
+        width: '400px',
+        height: '400px',
+        transform: 'rotate(-18deg)',
+        zIndex: 5,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/0d76c941b6498b0075eef088c1d6b2bb07c7908c.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      <div style={{
+        position: 'absolute',
+        right: '-95px',
+        bottom: '-135px',
+        width: '420px',
+        height: '420px',
+        transform: 'rotate(8deg)',
+        zIndex: 2,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/c17c68f8e18c5c1c1648399fb28175ffe6cb4326.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      <div style={{
+        position: 'absolute',
+        left: '95px',
+        bottom: '-120px',
+        width: '250px',
+        height: '250px',
+        transform: 'rotate(-14deg)',
+        zIndex: 2,
+        pointerEvents: 'none'
+      }}>
+        <img
+          src="/d429c39f6867b5ce2d27cfc5508281622d539613.png"
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain'
+          }}
+        />
+      </div>
+
+      <p style={{
+        position: 'absolute',
+        left: '40px',
+        top: '30px',
+        margin: 0,
+        width: '160px',
+        textAlign: 'left',
+        fontSize: '32px',
+        lineHeight: '36px',
+        letterSpacing: 0,
+        fontWeight: 400,
+        fontStyle: 'normal',
+        color: '#4B4B59',
+        fontFamily: '"Playfair Display", serif',
+        textShadow: 'inset 0px 4px 4px rgba(0, 0, 0, 0.25)'
+      }}>
+        PRẞM
+      </p>
+
+      <p style={{
+        position: 'absolute',
+        left: '50%',
+        top: '250px',
+        transform: 'translateX(-50%)',
+        margin: 0,
+        width: '255px',
+        textAlign: 'center',
+        fontSize: '14px',
+        lineHeight: '1.35',
+        fontWeight: 500,
+        color: '#666983',
+        fontFamily: 'Inter, sans-serif',
+        zIndex: 12
+      }}>
+        Scroll through Instagram to start analyzing posts.
+      </p>
+
+    </div>
+  );
+}
+
 // ---- Main App -------------------------------------------------------------
 
 export default function App() {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [onboardingStep, setOnboardingStep] = useState(null);
+
+  // Check if onboarding was already completed
+  useEffect(() => {
+    chrome.storage.local.get("onboardingComplete", (data) => {
+      setOnboardingStep(data.onboardingComplete ? 0 : 1);
+    });
+  }, []);
 
   // Load posts from session storage on mount
   useEffect(() => {
@@ -201,45 +433,119 @@ export default function App() {
   // Sort newest first
   const sortedPosts = [...posts].sort((a, b) => b.timestamp - a.timestamp);
 
+  const handleOnboardingComplete = () => {
+    chrome.storage.local.set({ onboardingComplete: true });
+    setOnboardingStep(0);
+  };
+
+  // Show loading while checking onboarding status
+  if (onboardingStep === null) {
+    return <div style={{ background: 'white', width: '100%', height: '100vh' }} />;
+  }
+
+  if (onboardingStep === 1) {
+    return <OnboardingScreen onNext={() => setOnboardingStep(2)} />;
+  }
+
+  if (onboardingStep === 2) {
+    return <OnboardingScreen2 onGetStarted={handleOnboardingComplete} />;
+  }
+
+  if (!loading && sortedPosts.length === 0) {
+    return <EmptyStateFrame12 />;
+  }
+
   return (
-    <div className="flex flex-col h-screen bg-prism-bg">
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      height: '100vh',
+      backgroundColor: '#ffffff'
+    }}>
       {/* Header */}
-      <header className="flex-shrink-0 px-4 pt-5 pb-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-prism-primary to-prism-accent bg-clip-text text-transparent">
+      <header style={{
+        flexShrink: 0,
+        padding: '20px 16px 12px',
+        borderBottom: '1px solid rgba(75, 75, 89, 0.1)'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between'
+        }}>
+          <h1 style={{
+            fontSize: '20px',
+            fontWeight: '700',
+            background: 'linear-gradient(135deg, #4B4B59 0%, #6B7280 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            margin: 0
+          }}>
             Prism
           </h1>
           {sortedPosts.length > 0 && (
-            <span className="text-[10px] font-medium text-prism-muted bg-prism-surface px-2 py-0.5 rounded-full">
+            <span style={{
+              fontSize: '10px',
+              fontWeight: '500',
+              color: 'rgba(75, 75, 89, 0.8)',
+              backgroundColor: 'rgba(75, 75, 89, 0.08)',
+              padding: '4px 8px',
+              borderRadius: '12px',
+              border: '1px solid rgba(75, 75, 89, 0.1)'
+            }}>
               {sortedPosts.length} post{sortedPosts.length !== 1 ? "s" : ""}
             </span>
           )}
         </div>
-        <p className="text-[11px] text-prism-muted tracking-wide uppercase mt-1">
+        <p style={{
+          fontSize: '11px',
+          color: 'rgba(75, 75, 89, 0.6)',
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+          marginTop: '8px',
+          margin: '8px 0 0 0'
+        }}>
           Instagram misinformation detector
         </p>
       </header>
 
       {/* Divider */}
-      <div className="h-px bg-prism-surface mx-4" />
+      <div style={{
+        height: '1px',
+        backgroundColor: 'rgba(75, 75, 89, 0.1)',
+        margin: '0 16px'
+      }} />
 
       {/* Body */}
-      <main className="flex-1 overflow-y-auto prism-scroll px-4 py-3">
+      <main style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '12px 16px',
+        backgroundColor: '#ffffff'
+      }}>
         {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin w-5 h-5 border-2 border-prism-primary border-t-transparent rounded-full" />
-          </div>
-        ) : sortedPosts.length === 0 ? (
-          /* Empty state */
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <div className="text-4xl mb-4 opacity-60">🔍</div>
-            <p className="text-sm text-prism-muted leading-relaxed">
-              Scroll through Instagram to start analyzing posts.
-            </p>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%'
+          }}>
+            <div style={{
+              animation: 'spin 1s linear infinite',
+              width: '20px',
+              height: '20px',
+              border: '2px solid rgba(75, 75, 89, 0.2)',
+              borderTop: '2px solid #4B4B59',
+              borderRadius: '50%'
+            }} />
           </div>
         ) : (
           /* Post feed */
-          <div className="flex flex-col gap-2">
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0'
+          }}>
             {sortedPosts.map((post) => (
               <PostCard key={post.id} post={post} />
             ))}
@@ -248,8 +554,16 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="flex-shrink-0 px-4 py-2 text-center">
-        <small className="text-[10px] text-gray-600">v1.0.0</small>
+      <footer style={{
+        flexShrink: 0,
+        padding: '8px 16px',
+        textAlign: 'center',
+        borderTop: '1px solid rgba(75, 75, 89, 0.1)'
+      }}>
+        <small style={{
+          fontSize: '10px',
+          color: 'rgba(107, 114, 128, 0.6)'
+        }}>v1.0.0</small>
       </footer>
     </div>
   );
